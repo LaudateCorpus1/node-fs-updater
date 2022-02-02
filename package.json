@@ -16,14 +16,14 @@
     "index.js"
   ],
   "engines": {
-    "node": ">=6.0.0"
+    "node": ">=14.18.0"
   },
   "dependencies": {
     "can-symlink": "^1.0.0",
     "clean-up-path": "^1.0.0",
     "heimdalljs": "^0.2.5",
     "heimdalljs-logger": "^0.1.9",
-    "rimraf": "^2.6.2"
+    "rimraf": "^3.0.2"
   },
   "devDependencies": {
     "chai": "^4.1.2",
