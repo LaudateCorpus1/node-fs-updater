@@ -11,16 +11,20 @@ let loggerGen = require("heimdalljs-logger");
 let cleanUpResolvedPath = cleanUpPath.cleanUpResolvedPath;
 let isResolved = cleanUpPath.isResolved;
 
+// 5 seconds. We'll try to cache for a bit of time, to avoid scanning same files
+// in a single rebuild.
+const CACHE_TTL = 5000;
+
+const GLOBAL_CACHE = new Map();
+
 class DirectoryIndex extends Map {}
 
 class Directory extends String {
-  constructor(p, cleanedUp, cacheObject, cacheTTL = 5000) {
+  constructor(p, cleanedUp) {
     if (!cleanedUp) p = cleanUpPath(p);
     super(p);
 
     this._isNodeModulesPackage = p.includes('node_modules');
-    this._cacheObject = cacheObject;
-    this._cacheTTL = cacheTTL;
   }
 
   getIndexSync() {
@@ -30,10 +34,7 @@ class Directory extends String {
       }
 
       const now = Date.now();
-
-      // We'll try to cache for a bit of time (_cacheTTL), to avoid scanning same files
-      // in a single rebuild.
-      const isCacheValid = (this._cacheBuildAt + this._cacheTTL) > now;
+      const isCacheValid = (this._cacheBuildAt + CACHE_TTL) > now;
 
       if (isCacheValid) {
         return this._index;
@@ -47,7 +48,7 @@ class Directory extends String {
       base += path.sep;
     }
     for (let entry of fs.readdirSync(p, { withFileTypes: true }).sort()) {
-      index.set(entry.name, new (makeFSObjectCleanedUp(base + entry.name, entry, this._cacheObject)));
+      index.set(entry.name, new makeFSObjectCleanedUp(base + entry.name, entry));
     }
 
     this._cacheBuildAt = Date.now();
@@ -85,42 +86,42 @@ if (!(new File("", true) instanceof File)) {
   throw new Error("The fs-updater package requires Node 6.0.0 or newer.");
 }
 
-function makeFSObject(p, cacheObject) {
-  return makeFSObjectCleanedUp(cleanUpPath(p), null, cacheObject);
+function makeFSObject(p) {
+  return makeFSObjectCleanedUp(cleanUpPath(p));
 }
 
-function getDirectoryClass(p, cacheObject) {
-  if (cacheObject && cacheObject.has(p)) {
-    return cacheObject.get(p);
+function getDirectoryClass(p) {
+  if (GLOBAL_CACHE.has(p)) {
+    return GLOBAL_CACHE.get(p);
   }
 
   let directory = new Directory(p, true);
 
-  cacheObject && cacheObject.set(p, directory);
+  GLOBAL_CACHE.set(p, directory);
 
   return directory;
 }
 
-function getFileClass(p, stats, cacheObject) {
-  if (cacheObject && cacheObject.has(p)) {
-    return cacheObject.get(p);
+function getFileClass(p, stats) {
+  if (GLOBAL_CACHE.has(p)) {
+    return GLOBAL_CACHE.get(p);
   }
 
   let directory = new File(p, true, stats);
 
-  cacheObject && cacheObject.set(p, directory);
+  GLOBAL_CACHE.set(p, directory);
 
   return directory;
 }
 
-function makeFSObjectCleanedUp(p, dirent, cacheObject) {
+function makeFSObjectCleanedUp(p, dirent) {
   if (dirent) {
     if (dirent.isDirectory()) {
-      return getDirectoryClass(p, cacheObject);
+      return getDirectoryClass(p);
     }
 
     if (dirent.isFile()) {
-      return getFileClass(p, undefined, cacheObject);
+      return getFileClass(p);
     }
 
     if (!dirent.isSymbolicLink()) {
@@ -130,11 +131,11 @@ function makeFSObjectCleanedUp(p, dirent, cacheObject) {
     let stats = fs.lstatSync(p);
 
     if (stats.isDirectory()) {
-      return getDirectoryClass(p, cacheObject);
+      return getDirectoryClass(p);
     }
 
     if (stats.isFile()) {
-      return getFileClass(p, stats, cacheObject);
+      return getFileClass(p, stats);
     }
     // Return FSObject pointing to target of symbolic link. This is so you can use
     // the returned FSObject to create a symlink without symlink indirection
@@ -153,8 +154,7 @@ function makeFSObjectCleanedUp(p, dirent, cacheObject) {
     target = fs.realpathSync(p);
   }
   target = cleanUpResolvedPath(target);
-
-  return makeFSObjectCleanedUp(target, undefined, cacheObject);
+  return makeFSObjectCleanedUp(target);
 }
 
 class FSUpdater {
